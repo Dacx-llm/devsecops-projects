@@ -1,0 +1,110 @@
+{
+  "rules": [
+    {
+      "name": "auto-vault-management",
+      "description": "Automatically scan and store secrets in local vault",
+      "trigger": {
+        "events": ["project-scan", "file-save", "pre-commit", "deployment"],
+        "file_patterns": [
+          "**/.env*",
+          "**/config/**/*",
+          "**/*.json",
+          "**/*.yaml",
+          "**/*.yml",
+          "**/*.js",
+          "**/*.ts",
+          "**/*.py",
+          "**/*.php",
+          "**/*.rb",
+          "**/*.go"
+        ]
+      },
+      "conditions": {
+        "scan_for_secrets": true,
+        "vault_backend": "hashicorp",
+        "auto_organize": true,
+        "create_paths": true
+      },
+      "vault_config": {
+        "backend": "hashicorp",
+        "address": "http://127.0.0.1:8200",
+        "token_file": "~/.vault-token",
+        "mount_path": "secret",
+        "base_path": "windsurf-projects"
+      },
+      "secret_patterns": {
+        "api_keys": {
+          "patterns": [
+            "(?i)(api[_-]?key|apikey)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{20,})['\"]?",
+            "(?i)(access[_-]?key|accesskey)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{20,})['\"]?",
+            "(?i)(secret[_-]?key|secretkey)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{20,})['\"]?",
+            "(?i)(bearer[_-]?token|token)\\s*[=:]\\s*['\"]?([a-zA-Z0-9._-]{20,})['\"]?",
+            "(?i)(client[_-]?secret|clientsecret)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{20,})['\"]?"
+          ],
+          "vault_path": "api-keys"
+        },
+        "database_credentials": {
+          "patterns": [
+            "(?i)(db[_-]?password|database[_-]?password)\\s*[=:]\\s*['\"]?([^'\"\\s]{8,})['\"]?",
+            "(?i)(mysql[_-]?password|postgres[_-]?password)\\s*[=:]\\s*['\"]?([^'\"\\s]{8,})['\"]?",
+            "(?i)(mongodb[_-]?password|mongo[_-]?password)\\s*[=:]\\s*['\"]?([^'\"\\s]{8,})['\"]?",
+            "(?i)(redis[_-]?password)\\s*[=:]\\s*['\"]?([^'\"\\s]{8,})['\"]?"
+          ],
+          "vault_path": "database"
+        },
+        "certificates": {
+          "patterns": [
+            "-----BEGIN [A-Z ]+-----[\\s\\S]*?-----END [A-Z ]+-----",
+            "(?i)(ssl[_-]?cert|certificate)\\s*[=:]\\s*['\"]?([^'\"\\s]{100,})['\"]?",
+            "(?i)(private[_-]?key)\\s*[=:]\\s*['\"]?([^'\"\\s]{100,})['\"]?"
+          ],
+          "vault_path": "certificates"
+        },
+        "cloud_credentials": {
+          "patterns": [
+            "(?i)(aws[_-]?access[_-]?key[_-]?id)\\s*[=:]\\s*['\"]?([A-Z0-9]{20})['\"]?",
+            "(?i)(aws[_-]?secret[_-]?access[_-]?key)\\s*[=:]\\s*['\"]?([a-zA-Z0-9/+]{40})['\"]?",
+            "(?i)(gcp[_-]?service[_-]?account|google[_-]?application[_-]?credentials)\\s*[=:]\\s*['\"]?([^'\"\\s]{50,})['\"]?",
+            "(?i)(azure[_-]?client[_-]?secret)\\s*[=:]\\s*['\"]?([a-zA-Z0-9._~-]{34,})['\"]?"
+          ],
+          "vault_path": "cloud"
+        },
+        "jwt_secrets": {
+          "patterns": [
+            "(?i)(jwt[_-]?secret|jwt[_-]?key)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{32,})['\"]?",
+            "(?i)(session[_-]?secret|cookie[_-]?secret)\\s*[=:]\\s*['\"]?([a-zA-Z0-9_-]{32,})['\"]?"
+          ],
+          "vault_path": "auth"
+        }
+      },
+      "pre_actions": [
+        {
+          "type": "run-script",
+          "script": "./scripts/vault-manager.js",
+          "args": ["--scan", "--auto-store", "--project", "{{project_name}}"]
+        }
+      ],
+      "actions": [
+        {
+          "type": "vault-operations",
+          "operations": [
+            "scan-secrets",
+            "create-vault-paths", 
+            "store-secrets",
+            "replace-with-references"
+          ]
+        }
+      ],
+      "validation": {
+        "verify_vault_connection": true,
+        "backup_original_files": true,
+        "confirm_secret_removal": false
+      },
+      "error_handling": {
+        "on_vault_unavailable": "log-warning",
+        "on_permission_denied": "fail-with-message",
+        "message": "❌ Vault access denied. Please check authentication and permissions."
+      }
+    }
+  ]
+}

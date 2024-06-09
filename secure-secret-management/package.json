@@ -1,0 +1,43 @@
+{
+  "name": "secure-secret-management",
+  "version": "1.0.0",
+  "description": "A comprehensive secret management solution that automatically detects, stores, and manages sensitive data in development environments",
+  "main": "src/index.js",
+  "scripts": {
+    "scan": "node scripts/vault-manager.js --scan",
+    "store-secrets": "node scripts/vault-manager.js --scan --auto-store",
+    "replace-secrets": "node scripts/vault-manager.js --scan --auto-store --replace",
+    "validate": "node src/validate-references.js",
+    "install-hooks": "bash scripts/install-hooks.sh",
+    "configure-vault": "bash scripts/configure-vault.sh",
+    "test": "jest"
+  },
+  "keywords": [
+    "security",
+    "devsecops",
+    "secret-management",
+    "vault",
+    "secrets-detection"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.4.0",
+    "commander": "^10.0.1",
+    "dotenv": "^16.0.3",
+    "glob": "^10.2.2",
+    "js-yaml": "^4.1.0",
+    "node-vault": "^0.9.22"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "eslint": "^8.40.0",
+    "eslint-config-standard": "^17.0.0",
+    "eslint-plugin-jest": "^27.2.1",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^6.1.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

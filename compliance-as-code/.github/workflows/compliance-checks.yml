@@ -1,0 +1,161 @@
+name: Continuous Compliance Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly scan on Sundays
+
+jobs:
+  policy-validation:
+    name: Validate OPA Policies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.46.0/opa_linux_amd64_static
+          chmod 755 ./opa
+
+      - name: Validate policies
+        run: |
+          ./opa test policies/
+
+      - name: Format check
+        run: |
+          ./opa fmt --list --fail policies/
+
+  terraform-compliance:
+    name: Terraform Compliance Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install terraform-compliance
+        run: |
+          pip install terraform-compliance
+
+      - name: Run terraform-compliance
+        run: |
+          if [ -d "terraform" ]; then
+            cd terraform
+            terraform init -backend=false
+            terraform-compliance -p . -f ../compliance/features/
+          else
+            echo "No terraform directory found, skipping terraform-compliance"
+          fi
+
+  cis-kubernetes:
+    name: CIS Kubernetes Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup kube-bench
+        run: |
+          curl -L -o kube-bench.tar.gz https://github.com/aquasecurity/kube-bench/releases/download/v0.6.9/kube-bench_0.6.9_linux_amd64.tar.gz
+          tar -xzvf kube-bench.tar.gz
+          chmod +x kube-bench
+
+      - name: Run kube-bench
+        run: |
+          # In a real environment, this would run against a real Kubernetes cluster
+          # For this example, we'll just simulate the output
+          echo "Simulating kube-bench output..."
+          mkdir -p reports
+          echo "CIS Kubernetes Benchmark results would appear here" > reports/kube-bench-results.txt
+
+  aws-security-hub:
+    name: AWS Security Hub Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Check Security Hub findings
+        run: |
+          # In a real environment, this would query AWS Security Hub
+          # For this example, we'll just simulate the output
+          echo "Simulating AWS Security Hub findings..."
+          mkdir -p reports
+          echo "AWS Security Hub compliance findings would appear here" > reports/security-hub-findings.txt
+
+  inspec-compliance:
+    name: InSpec Compliance Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+
+      - name: Install InSpec
+        run: |
+          gem install inspec
+
+      - name: Run InSpec
+        run: |
+          # In a real environment, this would run against real infrastructure
+          # For this example, we'll just simulate the output
+          echo "Simulating InSpec output..."
+          mkdir -p reports
+          echo "InSpec compliance results would appear here" > reports/inspec-results.txt
+
+  generate-report:
+    name: Generate Compliance Report
+    runs-on: ubuntu-latest
+    needs: [policy-validation, terraform-compliance, cis-kubernetes, aws-security-hub, inspec-compliance]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Generate consolidated report
+        run: |
+          echo "# Compliance Report" > compliance-report.md
+          echo "## Summary" >> compliance-report.md
+          echo "Compliance scan completed on $(date)" >> compliance-report.md
+          
+          echo "### Results by Tool" >> compliance-report.md
+          echo "- OPA Policy Validation: ${{ needs.policy-validation.result }}" >> compliance-report.md
+          echo "- Terraform Compliance: ${{ needs.terraform-compliance.result }}" >> compliance-report.md
+          echo "- CIS Kubernetes Benchmark: ${{ needs.cis-kubernetes.result }}" >> compliance-report.md
+          echo "- AWS Security Hub: ${{ needs.aws-security-hub.result }}" >> compliance-report.md
+          echo "- InSpec Compliance: ${{ needs.inspec-compliance.result }}" >> compliance-report.md
+
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-report
+          path: compliance-report.md

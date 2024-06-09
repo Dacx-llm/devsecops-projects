@@ -1,0 +1,67 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirenonrootuser
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireNonRootUser
+      validation:
+        openAPIV3Schema:
+          properties:
+            exemptImages:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirenonrootuser
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container_runs_as_non_root(container)
+          msg := sprintf("Container <%v> must set securityContext.runAsNonRoot=true", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not container_runs_as_non_root(container)
+          msg := sprintf("Init container <%v> must set securityContext.runAsNonRoot=true", [container.name])
+        }
+
+        container_runs_as_non_root(container) {
+          container.securityContext.runAsNonRoot == true
+        }
+
+        container_runs_as_non_root(container) {
+          container.securityContext.runAsUser > 0
+        }
+
+        container_runs_as_non_root(container) {
+          input.review.object.spec.securityContext.runAsNonRoot == true
+        }
+
+        container_runs_as_non_root(container) {
+          input.review.object.spec.securityContext.runAsUser > 0
+        }
+
+        # Exemptions for specific images
+        container_runs_as_non_root(container) {
+          exemptImage := input.parameters.exemptImages[_]
+          startswith(container.image, exemptImage)
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireNonRootUser
+metadata:
+  name: require-non-root-user
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    excludedNamespaces: ["kube-system"]
+  parameters:
+    exemptImages: []

@@ -1,0 +1,200 @@
+name: Terraform Security Checks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+      - '.github/workflows/terraform-security.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.tf'
+      - '**.tfvars'
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly scan on Sundays
+
+jobs:
+  tfsec:
+    name: TFSec Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: TFSec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          soft_fail: false
+          format: sarif
+          out: tfsec-results.sarif
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: tfsec-results.sarif
+          category: tfsec
+
+  checkov:
+    name: Checkov Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          output_format: sarif
+          output_file: checkov-results.sarif
+          soft_fail: false
+          skip_check: CKV_AWS_79,CKV_AWS_33
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov
+
+  terrascan:
+    name: Terrascan Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Terrascan
+        uses: accurics/terrascan-action@main
+        with:
+          iac_type: 'terraform'
+          iac_version: 'v14'
+          policy_type: 'aws'
+          only_warn: false
+          sarif_upload: true
+          non_recursive: false
+          verbose: true
+
+  terraform-validate:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+
+      - name: Terraform Init
+        run: |
+          for dir in $(find . -type f -name "*.tf" -not -path "*/\.*" | xargs -I {} dirname {} | sort -u); do
+            echo "Initializing Terraform in $dir"
+            cd $dir
+            terraform init -backend=false
+            cd - > /dev/null
+          done
+
+      - name: Terraform Validate
+        run: |
+          for dir in $(find . -type f -name "*.tf" -not -path "*/\.*" | xargs -I {} dirname {} | sort -u); do
+            echo "Validating Terraform in $dir"
+            cd $dir
+            terraform validate
+            cd - > /dev/null
+          done
+
+  snyk:
+    name: Snyk IaC Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Snyk to check Terraform files for issues
+        uses: snyk/actions/iac@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  opa-policy:
+    name: OPA Policy Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.46.0/opa_linux_amd64_static
+          chmod 755 ./opa
+
+      - name: Run OPA Policy Checks
+        run: |
+          if [ -d "policies" ]; then
+            ./opa test policies
+          else
+            echo "No policies directory found, skipping OPA tests"
+          fi
+
+  cost-estimation:
+    name: Terraform Cost Estimation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost cost estimate baseline
+        run: |
+          infracost breakdown --path=. \
+                            --format=json \
+                            --out-file=/tmp/infracost-base.json
+
+      - name: Post Infracost comment
+        if: github.event_name == 'pull_request'
+        run: |
+          infracost comment github --path=/tmp/infracost-base.json \
+                                  --repo=$GITHUB_REPOSITORY \
+                                  --github-token=${{ secrets.GITHUB_TOKEN }} \
+                                  --pull-request=${{ github.event.pull_request.number }} \
+                                  --behavior=update
+
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [tfsec, checkov, terrascan, terraform-validate, snyk, opa-policy, cost-estimation]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Generate consolidated report
+        run: |
+          echo "# Infrastructure Security Scan Results" > security-report.md
+          echo "## Summary" >> security-report.md
+          echo "Security scan completed on $(date)" >> security-report.md
+          echo "### Results by Tool" >> security-report.md
+          
+          # Add job status information
+          echo "- TFSec: ${{ needs.tfsec.result }}" >> security-report.md
+          echo "- Checkov: ${{ needs.checkov.result }}" >> security-report.md
+          echo "- Terrascan: ${{ needs.terrascan.result }}" >> security-report.md
+          echo "- Terraform Validate: ${{ needs.terraform-validate.result }}" >> security-report.md
+          echo "- Snyk: ${{ needs.snyk.result }}" >> security-report.md
+          echo "- OPA Policy: ${{ needs.opa-policy.result }}" >> security-report.md
+          echo "- Cost Estimation: ${{ needs.cost-estimation.result }}" >> security-report.md
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-report
+          path: security-report.md
